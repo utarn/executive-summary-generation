@@ -7,7 +7,8 @@ from collections import defaultdict
 import io
 import os
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException
+import base64
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
@@ -213,7 +214,7 @@ def generate_executive_summary_with_gemini(report_summary_text: str) -> str:
     client = genai.Client(
         api_key=os.environ.get("GEMINI_API_KEY"),
     )
-    model = "gemini-2.5-pro-preview-05-06"
+    model = "gemini-2.5-pro-preview-06-05"
 
     prompt = f"""{report_summary_text}
 ####
@@ -260,23 +261,24 @@ Do no write about invalid responses and data."""
         raise RuntimeError(f"Error calling Gemini API: {e}")
 
 
+class SummaryRequest(BaseModel):
+    uploaded_file: str  # base64-encoded file content
+
 class SummaryResponse(BaseModel):
     summary: str
 
-@app.post("/generate-summary/", response_model=SummaryResponse)
-async def create_summary_from_excel(uploaded_file: UploadFile = File(...)):
+@app.post("/generate-summary", response_model=SummaryResponse)
+async def create_summary_from_base64(request: SummaryRequest):
     """
-    Accepts an Excel file (form-data), processes it, generates a report summary,
+    Accepts a base64-encoded Excel file in JSON, processes it, generates a report summary,
     then uses Gemini to create an executive summary, and returns it as JSON.
     """
-    if not uploaded_file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload an Excel file (.xlsx or .xls).")
-
     try:
-        file_contents = await uploaded_file.read()
+        file_contents = base64.b64decode(request.uploaded_file)
     except Exception:
-        raise HTTPException(status_code=500, detail="Error reading uploaded file.")
+        raise HTTPException(status_code=400, detail="Invalid base64-encoded file.")
 
+    # Optionally, check file signature for Excel (magic bytes) or try reading to validate
     try:
         report_summary = process_excel_data(file_contents)
     except ValueError as e: # Catch specific error from process_excel_data
@@ -302,6 +304,6 @@ if __name__ == "__main__":
     import uvicorn
     # It's good practice to get host and port from environment variables too for deployment
     host = os.getenv("APP_HOST", "127.0.0.1")
-    port = int(os.getenv("APP_PORT", "8000"))
+    port = int(os.getenv("APP_PORT", "8001"))
     print(f"Starting Uvicorn server on {host}:{port}")
     uvicorn.run(app, host=host, port=port)
